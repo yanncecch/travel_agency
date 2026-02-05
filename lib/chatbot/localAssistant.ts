@@ -102,6 +102,12 @@ function extractInterest(input: string) {
 
 function extractBudget(input: string) {
   const text = normalize(input);
+  const parsedAmount = parseBudgetAmount(text);
+  if (parsedAmount !== undefined) {
+    if (parsedAmount <= 55000) return 'flex' as const;
+    if (parsedAmount <= 80000) return 'premium' as const;
+    return 'elite' as const;
+  }
   if (/(45|50|raisonnable|contenu|mesure)/.test(text)) return 'flex' as const;
   if (/(60|70|premium|confort)/.test(text)) return 'premium' as const;
   if (/(80|90|100|elite|sans limite|illimite)/.test(text)) return 'elite' as const;
@@ -124,6 +130,27 @@ function isAffirmative(input: string) {
 function isNegative(input: string) {
   const text = normalize(input).trim();
   return /^(non|no|pas maintenant|plus tard)$/.test(text);
+}
+
+function parseBudgetAmount(input: string) {
+  const text = normalize(input)
+    .replace(/€/g, '')
+    .replace(/\s+/g, '')
+    .replace(',', '.');
+
+  const kiloMatch = text.match(/(\d+(?:\.\d+)?)k/);
+  if (kiloMatch) {
+    const value = Number(kiloMatch[1]);
+    if (!Number.isNaN(value)) return Math.round(value * 1000);
+  }
+
+  const plainMatch = text.match(/(\d{4,7})/);
+  if (plainMatch) {
+    const value = Number(plainMatch[1]);
+    if (!Number.isNaN(value)) return value;
+  }
+
+  return undefined;
 }
 
 function destinationFromPreferences(context: AssistantContext): DestinationKey {
@@ -266,6 +293,38 @@ export function buildAssistantReply(message: string, context: AssistantContext):
   }
 
   if (context.qualificationStep === 'budget') {
+    if (/(option la plus accessible|continuer quand meme|continuer|accessible)/.test(text)) {
+      const nextContext: AssistantContext = {
+        ...context,
+        preferences: { ...context.preferences, budget: 'flex' },
+        qualificationStep: nextStepAfter(context.qualificationStep)
+      };
+      const prompt = qualificationPrompt(nextContext.qualificationStep);
+      return {
+        reply: `Parfait, je retiens un budget accessible. ${prompt.reply}`,
+        context: nextContext,
+        suggestions: prompt.suggestions
+      };
+    }
+
+    if (/(voir tous les tarifs|tarifs|prix)/.test(text)) {
+      return {
+        reply: pickVariant(pricingReplies, text),
+        context,
+        suggestions: ['Budget contenu', 'Premium confortable', 'Elite sans compromis']
+      };
+    }
+
+    const parsedAmount = parseBudgetAmount(text);
+    if (parsedAmount !== undefined && parsedAmount < 45000) {
+      return {
+        reply:
+          'Merci. Nos missions démarrent à 45 000 EUR par voyageur. Voulez-vous que je vous propose la meilleure option à ce niveau de budget ?',
+        context,
+        suggestions: ['Oui, option la plus accessible', 'Voir tous les tarifs', 'Continuer quand même']
+      };
+    }
+
     const budget = extractBudget(text);
     if (!budget) {
       const prompt = qualificationPrompt('budget');
