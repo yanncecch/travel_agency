@@ -116,6 +116,16 @@ function extractIntensity(input: string) {
   return undefined;
 }
 
+function isAffirmative(input: string) {
+  const text = normalize(input).trim();
+  return /^(oui|ouais|yes|ok|okay|dac|daccord|vas y|go|allons y)$/.test(text);
+}
+
+function isNegative(input: string) {
+  const text = normalize(input).trim();
+  return /^(non|no|pas maintenant|plus tard)$/.test(text);
+}
+
 function destinationFromPreferences(context: AssistantContext): DestinationKey {
   const { interest, budget, intensity } = context.preferences;
 
@@ -210,8 +220,37 @@ export function buildAssistantReply(message: string, context: AssistantContext):
     };
   }
 
+  if (isAffirmative(text) && (context.qualificationStep === 'none' || context.qualificationStep === 'done')) {
+    const nextContext: AssistantContext = {
+      ...context,
+      qualificationStep: 'interest'
+    };
+    const prompt = qualificationPrompt(nextContext.qualificationStep);
+    return {
+      reply: `Parfait, on démarre. ${prompt.reply}`,
+      context: nextContext,
+      suggestions: prompt.suggestions
+    };
+  }
+
+  if (isNegative(text) && (context.qualificationStep === 'none' || context.qualificationStep === 'done')) {
+    return {
+      reply: 'Très bien. Je peux alors vous répondre directement sur les prix, la sécurité ou comparer deux destinations.',
+      context,
+      suggestions: ['Quels sont vos tarifs ?', 'Le voyage est-il sûr ?', 'Comparer Paris et Florence']
+    };
+  }
+
   if (context.qualificationStep === 'interest') {
     const interest = extractInterest(text);
+    if (!interest) {
+      const prompt = qualificationPrompt('interest');
+      return {
+        reply: `Je n'ai pas bien saisi votre préférence. ${prompt.reply}`,
+        context,
+        suggestions: prompt.suggestions
+      };
+    }
     const nextContext: AssistantContext = {
       ...context,
       preferences: { ...context.preferences, interest },
@@ -228,6 +267,14 @@ export function buildAssistantReply(message: string, context: AssistantContext):
 
   if (context.qualificationStep === 'budget') {
     const budget = extractBudget(text);
+    if (!budget) {
+      const prompt = qualificationPrompt('budget');
+      return {
+        reply: `Je n'ai pas bien identifié votre budget. ${prompt.reply}`,
+        context,
+        suggestions: prompt.suggestions
+      };
+    }
     const nextContext: AssistantContext = {
       ...context,
       preferences: { ...context.preferences, budget },
@@ -244,6 +291,14 @@ export function buildAssistantReply(message: string, context: AssistantContext):
 
   if (context.qualificationStep === 'intensity') {
     const intensity = extractIntensity(text);
+    if (!intensity) {
+      const prompt = qualificationPrompt('intensity');
+      return {
+        reply: `Je n'ai pas bien compris le niveau d'intensité souhaité. ${prompt.reply}`,
+        context,
+        suggestions: prompt.suggestions
+      };
+    }
     const nextContext: AssistantContext = {
       ...context,
       preferences: { ...context.preferences, intensity },
